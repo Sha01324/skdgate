@@ -1,0 +1,14 @@
+name: build
+on: [push, workflow_dispatch]
+jobs:
+  b:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun --sdk iphoneos clang -arch arm64e -miphoneos-version-min=15.0 -isysroot "$SDK" -dynamiclib -fobjc-arc -O2 -undefined dynamic_lookup -o StoreKitDGate.dylib StoreKitDGate.m -framework Foundation
+          python3 -c "import struct;d=open('StoreKitDGate.dylib','rb').read(16);m,ct,cs,ft=struct.unpack('<IIII',d);print('cpusubtype=%08x'%cs)"
+      - run: brew install ldid && ldid -S StoreKitDGate.dylib || true
+      - uses: actions/upload-artifact@v4
+        with: {name: skdgate, path: StoreKitDGate.dylib}
