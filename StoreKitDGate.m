@@ -3,11 +3,12 @@
 #import <mach-o/dyld.h>
 #import <stdio.h>
 #import <unistd.h>
-#import <sys/stat.h>
+#include <stdlib.h>
 
 static FILE *gLog=NULL;
 static void openLog(void){
-    const char *paths[]={"/tmp/skdgate.log","/var/jb/tmp/skdgate.log","/private/var/tmp/skdgate.log",NULL};
+    const char *paths[]={"/tmp/skdgate.log","/private/var/tmp/skdgate.log","/var/jb/tmp/skdgate.log",
+        "/var/jb/Library/Logs/skdgate.log","/var/jb/var/mobile/Library/Logs/skdgate.log",NULL};
     for(int i=0;paths[i];i++){ gLog=fopen(paths[i],"a"); if(gLog) return; }
 }
 static void GLog(NSString *fmt,...){
@@ -18,22 +19,30 @@ static void GLog(NSString *fmt,...){
 }
 static BOOL gISB=NO,gSK=NO;
 static BOOL (*o1)(id,SEL,NSString*,BOOL)=NULL;
-static BOOL r1(id self,SEL _c,NSString*p,BOOL b){GLog(@"isSignedByAppleFileAtPath:%@ -> YES",p);return YES;}
+static BOOL r1(id self,SEL _c,NSString*p,BOOL b){GLog(@"isSignedByApple:%@ -> YES",p);return YES;}
 static BOOL (*o2)(id,SEL)=NULL;
 static BOOL r2(id self,SEL _c){GLog(@"sk_isAppStoreSigned -> YES");return YES;}
 static void swz(void){
-    Class c=objc_getClass("NSFileManager_LibAppStoreDaemon_");
-    if(c&&!gISB){Method m=class_getInstanceMethod(c,sel_registerName("isSignedByAppleFileAtPath:basicCheck:"));GLog(@"NSFileManager class=%p method=%p",c,m);if(m){o1=(void*)method_getImplementation(m);method_setImplementation(m,(IMP)r1);gISB=YES;GLog(@"hooked isSignedByApple OK");}}
-    Class l=objc_getClass("LSBundleRecord_LibAppStoreDaemon_");
-    if(l&&!gSK){Method m=class_getInstanceMethod(l,sel_registerName("sk_isAppStoreSigned"));GLog(@"LSBundleRecord class=%p method=%p",l,m);if(m){o2=(void*)method_getImplementation(m);method_setImplementation(m,(IMP)r2);gSK=YES;GLog(@"hooked sk_isAppStoreSigned OK");}}
+    if(gISB&&gSK) return;
+    int n=objc_getClassList(NULL,0);
+    if(n<=0) return;
+    Class *cs=(Class*)malloc(sizeof(Class)*n);
+    if(!cs) return;
+    objc_getClassList(cs,n);
+    SEL s1=sel_registerName("isSignedByAppleFileAtPath:basicCheck:");
+    SEL s2=sel_registerName("sk_isAppStoreSigned");
+    for(int i=0;i<n;i++){
+        Class c=cs[i];
+        if(!gISB){ Method m=class_getInstanceMethod(c,s1); if(m){o1=(void*)method_getImplementation(m);method_setImplementation(m,(IMP)r1);gISB=YES;GLog(@"hooked isSignedByApple on class %s",class_getName(c));}}
+        if(!gSK){ Method m=class_getInstanceMethod(c,s2); if(m){o2=(void*)method_getImplementation(m);method_setImplementation(m,(IMP)r2);gSK=YES;GLog(@"hooked sk_isAppStoreSigned on class %s",class_getName(c));}}
+        if(gISB&&gSK) break;
+    }
+    free(cs);
 }
 static void onimg(const struct mach_header*m,intptr_t v){swz();}
 __attribute__((constructor)) static void init(void){
     @autoreleasepool{
         GLog(@"===== loaded pid %d =====",getpid());
-        Class c1=objc_getClass("NSFileManager_LibAppStoreDaemon_");
-        Class c2=objc_getClass("LSBundleRecord_LibAppStoreDaemon_");
-        GLog(@"pre-scan classes: NSFileManager=%p LSBundleRecord=%p",c1,c2);
         swz();
         GLog(@"after swz: gISB=%d gSK=%d",(int)gISB,(int)gSK);
         if(!(gISB&&gSK)) _dyld_register_func_for_add_image(onimg);
